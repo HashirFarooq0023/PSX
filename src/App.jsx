@@ -43,6 +43,7 @@ export default function App() {
   const [regressionRes, setRegressionRes] = useState(null);
   const [regLoading, setRegLoading] = useState(false);
   const [regError, setRegError] = useState(null);
+  const [predX, setPredX] = useState('');
 
   // Colors for lines/charts
   const tickerColors = {
@@ -136,6 +137,15 @@ export default function App() {
   useEffect(() => {
     fetchRegression();
   }, [xVar, yVar, data]);
+
+  // Update prediction X variable to the mean of selected X stock when regression data is loaded
+  useEffect(() => {
+    if (xVar && statsData[xVar]) {
+      setPredX(statsData[xVar].mean.toFixed(2));
+    } else {
+      setPredX('');
+    }
+  }, [xVar, statsData]);
 
   // Toggle ticker selections
   const toggleTicker = (ticker) => {
@@ -908,6 +918,44 @@ export default function App() {
                           <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '8px', lineHeight: '1.4' }}>
                             Around <strong>{fmt(regressionRes.r_squared * 100, 1)}%</strong> of variance in {yVar} prices can be explained linearly by {xVar}. The relationship is <strong>{regressionRes.p_value < 0.05 ? 'statistically significant' : 'not statistically significant'}</strong> at &alpha;=5%.
                           </p>
+                        </div>
+
+                        <div className="glass-card glow" style={{ padding: '16px 20px', borderColor: 'rgba(52, 211, 153, 0.2)' }}>
+                          <h4 style={{ marginBottom: '12px', fontSize: '1rem', color: '#34d399' }}>Interactive Y Prediction</h4>
+                          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                            Input a price value for <strong>{xVar}</strong> to predict the price of <strong>{yVar}</strong> using the OLS model.
+                          </p>
+                          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}>
+                            <div className="control-group" style={{ margin: 0, flex: 1 }}>
+                              <label className="control-label" htmlFor="predict-x-input" style={{ fontSize: '0.75rem' }}>Value of X ({xVar.split('.')[0]})</label>
+                              <input 
+                                id="predict-x-input"
+                                type="number" 
+                                className="input-date" 
+                                style={{ width: '100%', padding: '6px 10px', height: '36px' }}
+                                placeholder="Enter value..."
+                                value={predX}
+                                onChange={(e) => setPredX(e.target.value)} 
+                              />
+                            </div>
+                            <div style={{ fontSize: '1.5rem', color: 'var(--text-secondary)', paddingTop: '16px' }}>➔</div>
+                            <div className="control-group" style={{ margin: 0, flex: 1 }}>
+                              <span className="control-label" style={{ fontSize: '0.75rem' }}>Predicted Y ({yVar.split('.')[0]})</span>
+                              <div style={{ 
+                                height: '36px', 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                padding: '6px 12px', 
+                                backgroundColor: 'rgba(255,255,255,0.05)', 
+                                border: '1px solid var(--border-color)', 
+                                borderRadius: '6px',
+                                fontWeight: '600',
+                                color: '#60a5fa'
+                              }}>
+                                {predX !== '' && !isNaN(predX) ? fmt(regressionRes.beta * parseFloat(predX) + regressionRes.intercept) : 'Enter X value'}
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
