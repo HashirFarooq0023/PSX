@@ -50,17 +50,11 @@ def migrate_files_to_stocks_data():
 # Run migration on load
 migrate_files_to_stocks_data()
 
-DEFAULT_TICKERS = ['MEBL.KA', 'NPL.KA', 'SYS.KA', 'FFC.KA', 'HUBC.KA']
-
-class RegressionRequest(BaseModel):
-    x_var: str
-    y_var: str
-    start: str
-    end: str
+IN_MEMORY_STOCK_CACHE = {}
 
 def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
     """
-    Checks if local JSON files exist in StocksData/; otherwise downloads from yfinance.
+    Checks if local JSON files exist in memory, `./StocksData/` or `/tmp/StocksData/`; otherwise downloads from yfinance.
     Uses cached local file if yfinance download fails (network failure).
     """
     combined_data = pd.DataFrame()
@@ -71,33 +65,52 @@ def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
         data_loaded = False
         symbol = ticker.split('.')[0]
         filename = f"{symbol}.json"
-        filepath = os.path.join(os.getcwd(), "StocksData", filename)
         
-        # Check if local JSON file exists and has content
-        if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+        # 1. Check in-memory cache first (crucial for Vercel)
+        if ticker in IN_MEMORY_STOCK_CACHE:
             try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    records = json.load(f)
+                records = IN_MEMORY_STOCK_CACHE[ticker]
                 if records:
                     df_ticker = pd.DataFrame(records)
                     if 'date' in df_ticker.columns and ('adj_close' in df_ticker.columns or 'close' in df_ticker.columns):
                         df_ticker['date'] = pd.to_datetime(df_ticker['date'])
                         df_ticker.set_index('date', inplace=True)
-                        
                         price_col = 'adj_close' if 'adj_close' in df_ticker.columns else 'close'
                         series = pd.to_numeric(df_ticker[price_col], errors='coerce')
-                        
-                        # Filter by date range using boolean index
                         series = series[(series.index >= start_dt) & (series.index <= end_dt)]
-                        
                         if not series.empty:
                             combined_data[ticker] = series
                             data_loaded = True
-                            print(f"Loaded {ticker} from local file StocksData/{filename} ({len(series)} points)")
+                            print(f"Loaded {ticker} from in-memory cache ({len(series)} points)")
             except Exception as e:
-                print(f"Error loading local JSON for {ticker}: {e}")
+                print(f"Error loading from in-memory cache for {ticker}: {e}")
+
+        # 2. Check local directories (StocksData/ and /tmp/StocksData/)
+        if not data_loaded:
+            for base_dir in [os.getcwd(), "/tmp"]:
+                filepath_check = os.path.join(base_dir, "StocksData", filename)
+                if os.path.exists(filepath_check) and os.path.getsize(filepath_check) > 0:
+                    try:
+                        with open(filepath_check, 'r', encoding='utf-8') as f:
+                            records = json.load(f)
+                        if records:
+                            df_ticker = pd.DataFrame(records)
+                            if 'date' in df_ticker.columns and ('adj_close' in df_ticker.columns or 'close' in df_ticker.columns):
+                                df_ticker['date'] = pd.to_datetime(df_ticker['date'])
+                                df_ticker.set_index('date', inplace=True)
+                                price_col = 'adj_close' if 'adj_close' in df_ticker.columns else 'close'
+                                series = pd.to_numeric(df_ticker[price_col], errors='coerce')
+                                series = series[(series.index >= start_dt) & (series.index <= end_dt)]
+                                if not series.empty:
+                                    combined_data[ticker] = series
+                                    data_loaded = True
+                                    IN_MEMORY_STOCK_CACHE[ticker] = records
+                                    print(f"Loaded {ticker} from local file {filepath_check} ({len(series)} points)")
+                                    break
+                    except Exception as e:
+                        print(f"Error loading local JSON {filepath_check} for {ticker}: {e}")
                 
-        # If not loaded from local JSON, fetch from Yahoo Finance (website)
+        # 3. Fetch from Yahoo Finance (website)
         if not data_loaded:
             print(f"Fetching {ticker} from Yahoo Finance (website)...")
             try:
@@ -125,7 +138,7 @@ def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
                             data_loaded = True
                             print(f"Successfully downloaded {ticker} from Yahoo Finance ({len(series)} points)")
                             
-                            # Cache download back to file so next time it is offline-capable!
+                            # Cache download back to memory & try saving to disk
                             try:
                                 save_df = pd.DataFrame(index=raw_df.index)
                                 if isinstance(raw_df.columns, pd.MultiIndex):
@@ -158,10 +171,28 @@ def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
                                         'adj_close': row['Adj Close'],
                                         'volume': int(row['Volume']) if row['Volume'] is not None else 0
                                     })
-                                os.makedirs(os.path.join(os.getcwd(), "StocksData"), exist_ok=True)
-                                with open(filepath, 'w', encoding='utf-8') as f:
-                                    json.dump(save_records, f, indent=2)
-                                print(f"Cached {ticker} data to StocksData/{filename}")
+                                
+                                IN_MEMORY_STOCK_CACHE[ticker] = save_records
+                                
+                                # Try to write to project directory
+                                try:
+                                    filepath = os.path.join(os.getcwd(), "StocksData", filename)
+                                    os.makedirs(os.path.join(os.getcwd(), "StocksData"), exist_ok=True)
+                                    with open(filepath, 'w', encoding='utf-8') as f:
+                                        json.dump(save_records, f, indent=2)
+                                    print(f"Cached {ticker} data to StocksData/{filename}")
+                                except Exception as cache_err:
+                                    print(f"Failed to cache fetched data to disk (expected on Vercel): {cache_err}")
+                                    try:
+                                        # Fallback to writeable /tmp directory
+                                        tmp_dir = "/tmp/StocksData"
+                                        os.makedirs(tmp_dir, exist_ok=True)
+                                        tmp_path = os.path.join(tmp_dir, filename)
+                                        with open(tmp_path, 'w', encoding='utf-8') as f:
+                                            json.dump(save_records, f, indent=2)
+                                        print(f"Cached {ticker} dynamically in /tmp at {tmp_path}")
+                                    except Exception as tmp_err:
+                                        print(f"Temporary file caching failed: {tmp_err}")
                             except Exception as cache_err:
                                 print(f"Failed to cache fetched data: {cache_err}")
                     else:
@@ -171,26 +202,30 @@ def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
             except Exception as e:
                 print(f"Failed to download {ticker} from yfinance: {e}")
 
-            # Offline Fallback
-            if not data_loaded and os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-                print(f"Network download failed for {ticker}. Attempting fallback to existing local cache...")
-                try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        records = json.load(f)
-                    if records:
-                        df_ticker = pd.DataFrame(records)
-                        if 'date' in df_ticker.columns and ('adj_close' in df_ticker.columns or 'close' in df_ticker.columns):
-                            df_ticker['date'] = pd.to_datetime(df_ticker['date'])
-                            df_ticker.set_index('date', inplace=True)
-                            price_col = 'adj_close' if 'adj_close' in df_ticker.columns else 'close'
-                            series = pd.to_numeric(df_ticker[price_col], errors='coerce')
-                            series = series[(series.index >= start_dt) & (series.index <= end_dt)]
-                            if not series.empty:
-                                combined_data[ticker] = series
-                                data_loaded = True
-                                print(f"Fallback successful: loaded {ticker} from local file ({len(series)} points)")
-                except Exception as fb_err:
-                    print(f"Fallback failed for {ticker}: {fb_err}")
+            # Offline / Cached Fallbacks
+            if not data_loaded:
+                for base_dir in [os.getcwd(), "/tmp"]:
+                    filepath_check = os.path.join(base_dir, "StocksData", filename)
+                    if os.path.exists(filepath_check) and os.path.getsize(filepath_check) > 0:
+                        print(f"Network download failed for {ticker}. Attempting fallback to existing local cache at {filepath_check}...")
+                        try:
+                            with open(filepath_check, 'r', encoding='utf-8') as f:
+                                records = json.load(f)
+                            if records:
+                                df_ticker = pd.DataFrame(records)
+                                if 'date' in df_ticker.columns and ('adj_close' in df_ticker.columns or 'close' in df_ticker.columns):
+                                    df_ticker['date'] = pd.to_datetime(df_ticker['date'])
+                                    df_ticker.set_index('date', inplace=True)
+                                    price_col = 'adj_close' if 'adj_close' in df_ticker.columns else 'close'
+                                    series = pd.to_numeric(df_ticker[price_col], errors='coerce')
+                                    series = series[(series.index >= start_dt) & (series.index <= end_dt)]
+                                    if not series.empty:
+                                        combined_data[ticker] = series
+                                        data_loaded = True
+                                        print(f"Fallback successful: loaded {ticker} from file ({len(series)} points)")
+                                        break
+                        except Exception as fb_err:
+                            print(f"Fallback failed for {ticker}: {fb_err}")
                     
     if combined_data.empty:
         raise ValueError("No stock data could be loaded from local files or Yahoo Finance.")
@@ -200,16 +235,26 @@ def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
 
 @app.get("/api/tickers")
 async def get_tickers():
-    stocks_dir = os.path.join(os.getcwd(), "StocksData")
-    os.makedirs(stocks_dir, exist_ok=True)
-    files = [f for f in os.listdir(stocks_dir) if f.endswith(".json")]
     tickers = []
-    for f in files:
-        symbol = f[:-5]
-        if '.' not in symbol:
-            tickers.append(f"{symbol}.KA")
-        else:
-            tickers.append(symbol)
+    
+    # 1. Scan in-memory cache
+    for k in IN_MEMORY_STOCK_CACHE.keys():
+        tickers.append(k)
+        
+    # 2. Scan StocksData directories
+    for base_dir in [os.getcwd(), "/tmp"]:
+        stocks_dir = os.path.join(base_dir, "StocksData")
+        if os.path.exists(stocks_dir):
+            try:
+                files = [f for f in os.listdir(stocks_dir) if f.endswith(".json")]
+                for f in files:
+                    symbol = f[:-5]
+                    if '.' not in symbol:
+                        tickers.append(f"{symbol}.KA")
+                    else:
+                        tickers.append(symbol)
+            except Exception as e:
+                print(f"Error scanning directory {stocks_dir}: {e}")
             
     all_tickers = sorted(list(set(tickers + DEFAULT_TICKERS)))
     return {"tickers": all_tickers}
@@ -226,9 +271,6 @@ async def add_ticker(ticker: str = Query(..., description="Ticker symbol to add"
         
     symbol_name = yf_symbol.split('.')[0]
     filename = f"{symbol_name}.json"
-    stocks_dir = os.path.join(os.getcwd(), "StocksData")
-    os.makedirs(stocks_dir, exist_ok=True)
-    filepath = os.path.join(stocks_dir, filename)
     
     start_date = "2024-01-01"
     end_date = datetime.today().strftime('%Y-%m-%d')
@@ -240,7 +282,6 @@ async def add_ticker(ticker: str = Query(..., description="Ticker symbol to add"
             yf_symbol = ticker
             symbol_name = yf_symbol
             filename = f"{symbol_name}.json"
-            filepath = os.path.join(stocks_dir, filename)
             raw_df = yf.download(yf_symbol, start=start_date, end=end_date)
             
         if raw_df.empty:
@@ -278,8 +319,31 @@ async def add_ticker(ticker: str = Query(..., description="Ticker symbol to add"
                 'volume': int(row['Volume']) if row['Volume'] is not None else 0
             })
             
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(json_records, f, indent=2)
+        # Write to in-memory store
+        IN_MEMORY_STOCK_CACHE[yf_symbol] = json_records
+        
+        # Try writing to root folder
+        filepath = os.path.join(os.getcwd(), "StocksData", filename)
+        disk_written = False
+        try:
+            os.makedirs(os.path.join(os.getcwd(), "StocksData"), exist_ok=True)
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(json_records, f, indent=2)
+            disk_written = True
+        except Exception as cache_err:
+            print(f"Disk save failed, expected on Vercel: {cache_err}")
+            
+        # Try writing to /tmp directory
+        if not disk_written:
+            try:
+                tmp_dir = "/tmp/StocksData"
+                os.makedirs(tmp_dir, exist_ok=True)
+                tmp_path = os.path.join(tmp_dir, filename)
+                with open(tmp_path, 'w', encoding='utf-8') as f:
+                    json.dump(json_records, f, indent=2)
+                print(f"Saved custom ticker to temporary folder: {tmp_path}")
+            except Exception as tmp_err:
+                print(f"Failed to write to temporary folder: {tmp_err}")
             
         return {
             "status": "success",
@@ -288,14 +352,17 @@ async def add_ticker(ticker: str = Query(..., description="Ticker symbol to add"
             "records_count": len(json_records)
         }
     except Exception as e:
-        if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-            return {
-                "status": "success",
-                "ticker": yf_symbol,
-                "filename": filename,
-                "message": "Failed to fetch fresh data, loaded from existing file.",
-                "note": str(e)
-            }
+        # Fallback to local files if present
+        for base_dir in [os.getcwd(), "/tmp"]:
+            filepath_check = os.path.join(base_dir, "StocksData", filename)
+            if os.path.exists(filepath_check) and os.path.getsize(filepath_check) > 0:
+                return {
+                    "status": "success",
+                    "ticker": yf_symbol,
+                    "filename": filename,
+                    "message": "Failed to fetch fresh data, loaded from existing file.",
+                    "note": str(e)
+                }
         raise HTTPException(status_code=500, detail=f"Failed to fetch stock data for {ticker}: {str(e)}")
 
 @app.get("/api/data")

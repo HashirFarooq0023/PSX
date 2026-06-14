@@ -20,6 +20,10 @@ const fmt = (val, decimals = 2) => {
 };
 
 export default function App() {
+  const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:8000'
+    : '';
+
   // Config & State
   const [selectedTickers, setSelectedTickers] = useState(DEFAULT_TICKERS);
   const [startDate, setStartDate] = useState('2024-01-01');
@@ -64,7 +68,7 @@ export default function App() {
   // Fetch available tickers from backend
   const fetchTickers = async (autoSelectNew = null) => {
     try {
-      const res = await fetch('http://localhost:8000/api/tickers');
+      const res = await fetch(`${API_BASE}/api/tickers`);
       if (!res.ok) throw new Error('Failed to fetch tickers list.');
       const json = await res.json();
       setAllTickers(json.tickers);
@@ -108,7 +112,7 @@ export default function App() {
       const tickersQuery = selectedTickers.join(',');
       
       // Fetch prices
-      const dataRes = await fetch(`http://localhost:8000/api/data?tickers=${tickersQuery}&start=${startDate}&end=${endDate}`);
+      const dataRes = await fetch(`${API_BASE}/api/data?tickers=${tickersQuery}&start=${startDate}&end=${endDate}`);
       if (!dataRes.ok) throw new Error('Failed to fetch stock prices.');
       const dataJson = await dataRes.json();
       
@@ -130,7 +134,7 @@ export default function App() {
       }
       
       // Fetch stats
-      const statsRes = await fetch(`http://localhost:8000/api/stats?tickers=${tickersQuery}&start=${startDate}&end=${endDate}`);
+      const statsRes = await fetch(`${API_BASE}/api/stats?tickers=${tickersQuery}&start=${startDate}&end=${endDate}`);
       if (!statsRes.ok) throw new Error('Failed to fetch descriptive statistics.');
       const statsJson = await statsRes.json();
       setStatsData(statsJson.stats);
@@ -153,7 +157,7 @@ export default function App() {
     setRegLoading(true);
     setRegError(null);
     try {
-      const res = await fetch('http://localhost:8000/api/regression', {
+      const res = await fetch(`${API_BASE}/api/regression`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -409,7 +413,7 @@ export default function App() {
               setAddingTicker(true);
               setAddTickerError(null);
               try {
-                const res = await fetch(`http://localhost:8000/api/tickers/add?ticker=${symbol}`, {
+                const res = await fetch(`${API_BASE}/api/tickers/add?ticker=${symbol}`, {
                   method: 'POST'
                 });
                 if (!res.ok) {
