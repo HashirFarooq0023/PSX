@@ -3,6 +3,7 @@ import pandas as pd
 import json
 import numpy as np
 import os
+from datetime import datetime
 
 # Define Tickers
 tickers = {
@@ -11,10 +12,11 @@ tickers = {
     'SYS.KA': 'SYS.json',
     'FFC.KA': 'FFC.json',
     'HUBC.KA': 'HUBC.json' 
+}
 
-# Timeframe from 2025-01-01 to the latest date in 2026
-start_date = "2025-01-01"
-end_date = "2026-06-14"  # Fetches up to today (2026-06-13)
+# Timeframe from 2024-01-01 to today
+start_date = "2024-01-01"
+end_date = datetime.today().strftime('%Y-%m-%d')
 
 print(f"Downloading historical stock data from {start_date} to {end_date}...")
 
@@ -71,11 +73,13 @@ for ticker, filename in tickers.items():
             json_records.append(record)
             
         # Write to JSON file
-        output_path = os.path.join(os.getcwd(), filename)
+        stocks_dir = os.path.join(os.getcwd(), "StocksData")
+        os.makedirs(stocks_dir, exist_ok=True)
+        output_path = os.path.join(stocks_dir, filename)
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(json_records, f, indent=2)
             
-        print(f"Successfully wrote {len(json_records)} records to {filename}")
+        print(f"Successfully wrote {len(json_records)} records to StocksData/{filename}")
         
     except Exception as e:
         print(f"Failed to fetch/save data for {ticker}: {e}")

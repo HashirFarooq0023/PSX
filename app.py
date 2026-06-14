@@ -28,6 +28,28 @@ app.add_middleware(
 )
 
 # In-memory tickers
+# Startup Migration logic to move files from root to StocksData/
+def migrate_files_to_stocks_data():
+    stocks_dir = os.path.join(os.getcwd(), "StocksData")
+    os.makedirs(stocks_dir, exist_ok=True)
+    
+    default_files = ['MEBL.json', 'NPL.json', 'SYS.json', 'FFC.json', 'HUBC.json']
+    import shutil
+    for filename in default_files:
+        root_path = os.path.join(os.getcwd(), filename)
+        dest_path = os.path.join(stocks_dir, filename)
+        if os.path.exists(root_path):
+            try:
+                if os.path.exists(dest_path):
+                    os.remove(dest_path)
+                shutil.move(root_path, dest_path)
+                print(f"Migrated {filename} to StocksData/")
+            except Exception as e:
+                print(f"Error migrating {filename}: {e}")
+
+# Run migration on load
+migrate_files_to_stocks_data()
+
 DEFAULT_TICKERS = ['MEBL.KA', 'NPL.KA', 'SYS.KA', 'FFC.KA', 'HUBC.KA']
 
 class RegressionRequest(BaseModel):
@@ -36,18 +58,10 @@ class RegressionRequest(BaseModel):
     start: str
     end: str
 
-TICKER_MAP = {
-    'MEBL.KA': 'MEBL.json',
-    'NPL.KA': 'NPL.json',
-    'SYS.KA': 'SYS.json',
-    'FFC.KA': 'FFC.json',
-    'HUBC.KA': 'HUBC.json',
-    'HUBCO.KA': 'HUBC.json'
-}
-
 def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
     """
-    Checks if local JSON files have content; otherwise fetches from Yahoo Finance.
+    Checks if local JSON files exist in StocksData/; otherwise downloads from yfinance.
+    Uses cached local file if yfinance download fails (network failure).
     """
     combined_data = pd.DataFrame()
     start_dt = pd.to_datetime(start)
@@ -55,8 +69,9 @@ def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
     
     for ticker in tickers:
         data_loaded = False
-        filename = TICKER_MAP.get(ticker, f"{ticker.split('.')[0]}.json")
-        filepath = os.path.join(os.getcwd(), filename)
+        symbol = ticker.split('.')[0]
+        filename = f"{symbol}.json"
+        filepath = os.path.join(os.getcwd(), "StocksData", filename)
         
         # Check if local JSON file exists and has content
         if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
@@ -78,7 +93,7 @@ def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
                         if not series.empty:
                             combined_data[ticker] = series
                             data_loaded = True
-                            print(f"Loaded {ticker} from local file {filename} ({len(series)} points)")
+                            print(f"Loaded {ticker} from local file StocksData/{filename} ({len(series)} points)")
             except Exception as e:
                 print(f"Error loading local JSON for {ticker}: {e}")
                 
@@ -109,29 +124,185 @@ def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
                             combined_data[ticker] = series
                             data_loaded = True
                             print(f"Successfully downloaded {ticker} from Yahoo Finance ({len(series)} points)")
+                            
+                            # Cache download back to file so next time it is offline-capable!
+                            try:
+                                save_df = pd.DataFrame(index=raw_df.index)
+                                if isinstance(raw_df.columns, pd.MultiIndex):
+                                    save_df['Open'] = raw_df['Open'][ticker]
+                                    save_df['High'] = raw_df['High'][ticker]
+                                    save_df['Low'] = raw_df['Low'][ticker]
+                                    save_df['Close'] = raw_df['Close'][ticker]
+                                    save_df['Adj Close'] = raw_df['Adj Close'][ticker] if 'Adj Close' in raw_df.columns.levels[0] else raw_df['Close'][ticker]
+                                    save_df['Volume'] = raw_df['Volume'][ticker]
+                                else:
+                                    save_df['Open'] = raw_df['Open']
+                                    save_df['High'] = raw_df['High']
+                                    save_df['Low'] = raw_df['Low']
+                                    save_df['Close'] = raw_df['Close']
+                                    save_df['Adj Close'] = raw_df['Adj Close'] if 'Adj Close' in raw_df.columns else raw_df['Close']
+                                    save_df['Volume'] = raw_df['Volume']
+                                
+                                save_df = save_df.reset_index()
+                                save_df['Date'] = save_df['Date'].dt.strftime('%Y-%m-%d')
+                                save_df = save_df.replace({np.nan: None})
+                                
+                                save_records = []
+                                for _, row in save_df.iterrows():
+                                    save_records.append({
+                                        'date': row['Date'],
+                                        'open': row['Open'],
+                                        'high': row['High'],
+                                        'low': row['Low'],
+                                        'close': row['Close'],
+                                        'adj_close': row['Adj Close'],
+                                        'volume': int(row['Volume']) if row['Volume'] is not None else 0
+                                    })
+                                os.makedirs(os.path.join(os.getcwd(), "StocksData"), exist_ok=True)
+                                with open(filepath, 'w', encoding='utf-8') as f:
+                                    json.dump(save_records, f, indent=2)
+                                print(f"Cached {ticker} data to StocksData/{filename}")
+                            except Exception as cache_err:
+                                print(f"Failed to cache fetched data: {cache_err}")
                     else:
                         print(f"No valid price series found for {ticker} in download.")
                 else:
                     print(f"Empty data returned for {ticker} from yfinance.")
             except Exception as e:
                 print(f"Failed to download {ticker} from yfinance: {e}")
-                
+
+            # Offline Fallback
+            if not data_loaded and os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                print(f"Network download failed for {ticker}. Attempting fallback to existing local cache...")
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        records = json.load(f)
+                    if records:
+                        df_ticker = pd.DataFrame(records)
+                        if 'date' in df_ticker.columns and ('adj_close' in df_ticker.columns or 'close' in df_ticker.columns):
+                            df_ticker['date'] = pd.to_datetime(df_ticker['date'])
+                            df_ticker.set_index('date', inplace=True)
+                            price_col = 'adj_close' if 'adj_close' in df_ticker.columns else 'close'
+                            series = pd.to_numeric(df_ticker[price_col], errors='coerce')
+                            series = series[(series.index >= start_dt) & (series.index <= end_dt)]
+                            if not series.empty:
+                                combined_data[ticker] = series
+                                data_loaded = True
+                                print(f"Fallback successful: loaded {ticker} from local file ({len(series)} points)")
+                except Exception as fb_err:
+                    print(f"Fallback failed for {ticker}: {fb_err}")
+                    
     if combined_data.empty:
         raise ValueError("No stock data could be loaded from local files or Yahoo Finance.")
         
-    # Drop rows where all tickers are NaN, sort by date
     combined_data = combined_data.dropna(how='all').sort_index()
     return combined_data
 
 @app.get("/api/tickers")
 async def get_tickers():
-    return {"tickers": DEFAULT_TICKERS}
+    stocks_dir = os.path.join(os.getcwd(), "StocksData")
+    os.makedirs(stocks_dir, exist_ok=True)
+    files = [f for f in os.listdir(stocks_dir) if f.endswith(".json")]
+    tickers = []
+    for f in files:
+        symbol = f[:-5]
+        if '.' not in symbol:
+            tickers.append(f"{symbol}.KA")
+        else:
+            tickers.append(symbol)
+            
+    all_tickers = sorted(list(set(tickers + DEFAULT_TICKERS)))
+    return {"tickers": all_tickers}
+
+@app.post("/api/tickers/add")
+async def add_ticker(ticker: str = Query(..., description="Ticker symbol to add")):
+    ticker = ticker.strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="Ticker symbol cannot be empty.")
+        
+    yf_symbol = ticker
+    if '.' not in ticker:
+        yf_symbol = f"{ticker}.KA"
+        
+    symbol_name = yf_symbol.split('.')[0]
+    filename = f"{symbol_name}.json"
+    stocks_dir = os.path.join(os.getcwd(), "StocksData")
+    os.makedirs(stocks_dir, exist_ok=True)
+    filepath = os.path.join(stocks_dir, filename)
+    
+    start_date = "2024-01-01"
+    end_date = datetime.today().strftime('%Y-%m-%d')
+    
+    print(f"Fetching data for new ticker {yf_symbol}...")
+    try:
+        raw_df = yf.download(yf_symbol, start=start_date, end=end_date)
+        if raw_df.empty and yf_symbol != ticker:
+            yf_symbol = ticker
+            symbol_name = yf_symbol
+            filename = f"{symbol_name}.json"
+            filepath = os.path.join(stocks_dir, filename)
+            raw_df = yf.download(yf_symbol, start=start_date, end=end_date)
+            
+        if raw_df.empty:
+            raise HTTPException(status_code=400, detail=f"No stock data found for ticker {ticker} on Yahoo Finance.")
+            
+        df = pd.DataFrame(index=raw_df.index)
+        if isinstance(raw_df.columns, pd.MultiIndex):
+            df['Open'] = raw_df['Open'][yf_symbol]
+            df['High'] = raw_df['High'][yf_symbol]
+            df['Low'] = raw_df['Low'][yf_symbol]
+            df['Close'] = raw_df['Close'][yf_symbol]
+            df['Adj Close'] = raw_df['Adj Close'][yf_symbol] if 'Adj Close' in raw_df.columns.levels[0] else raw_df['Close'][yf_symbol]
+            df['Volume'] = raw_df['Volume'][yf_symbol]
+        else:
+            df['Open'] = raw_df['Open']
+            df['High'] = raw_df['High']
+            df['Low'] = raw_df['Low']
+            df['Close'] = raw_df['Close']
+            df['Adj Close'] = raw_df['Adj Close'] if 'Adj Close' in raw_df.columns else raw_df['Close']
+            df['Volume'] = raw_df['Volume']
+            
+        df = df.reset_index()
+        df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
+        df = df.replace({np.nan: None})
+        
+        json_records = []
+        for _, row in df.iterrows():
+            json_records.append({
+                'date': row['Date'],
+                'open': row['Open'],
+                'high': row['High'],
+                'low': row['Low'],
+                'close': row['Close'],
+                'adj_close': row['Adj Close'],
+                'volume': int(row['Volume']) if row['Volume'] is not None else 0
+            })
+            
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(json_records, f, indent=2)
+            
+        return {
+            "status": "success",
+            "ticker": yf_symbol,
+            "filename": filename,
+            "records_count": len(json_records)
+        }
+    except Exception as e:
+        if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+            return {
+                "status": "success",
+                "ticker": yf_symbol,
+                "filename": filename,
+                "message": "Failed to fetch fresh data, loaded from existing file.",
+                "note": str(e)
+            }
+        raise HTTPException(status_code=500, detail=f"Failed to fetch stock data for {ticker}: {str(e)}")
 
 @app.get("/api/data")
 async def get_data(
     tickers: str = Query(..., description="Comma-separated ticker list"),
-    start: str = Query("2025-01-01", description="Start date YYYY-MM-DD"),
-    end: str = Query("2026-06-01", description="End date YYYY-MM-DD")
+    start: str = Query("2024-01-01", description="Start date YYYY-MM-DD"),
+    end: str = Query("2026-06-14", description="End date YYYY-MM-DD")
 ):
     ticker_list = [t.strip() for t in tickers.split(",") if t.strip()]
     if not ticker_list:
@@ -163,8 +334,8 @@ async def get_data(
 @app.get("/api/stats")
 async def get_stats(
     tickers: str = Query(..., description="Comma-separated ticker list"),
-    start: str = Query("2025-01-01", description="Start date YYYY-MM-DD"),
-    end: str = Query("2026-06-01", description="End date YYYY-MM-DD")
+    start: str = Query("2024-01-01", description="Start date YYYY-MM-DD"),
+    end: str = Query("2026-06-14", description="End date YYYY-MM-DD")
 ):
     ticker_list = [t.strip() for t in tickers.split(",") if t.strip()]
     try:

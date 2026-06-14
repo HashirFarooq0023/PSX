@@ -22,8 +22,8 @@ const fmt = (val, decimals = 2) => {
 export default function App() {
   // Config & State
   const [selectedTickers, setSelectedTickers] = useState(DEFAULT_TICKERS);
-  const [startDate, setStartDate] = useState('2025-01-01');
-  const [endDate, setEndDate] = useState('2026-06-01');
+  const [startDate, setStartDate] = useState('2024-01-01');
+  const [endDate, setEndDate] = useState('2026-06-14');
   const [activeTab, setActiveTab] = useState('stats');
   
   // Data State
@@ -33,6 +33,12 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
+  // New Ticker Adding State
+  const [allTickers, setAllTickers] = useState([]);
+  const [newTicker, setNewTicker] = useState('');
+  const [addingTicker, setAddingTicker] = useState(false);
+  const [addTickerError, setAddTickerError] = useState(null);
+
   // Chart Display state
   const [chartView, setChartView] = useState('absolute'); // absolute or normalized
   const [tickerHist, setTickerHist] = useState('');
@@ -54,6 +60,44 @@ export default function App() {
     'HUBC.KA': '#ec4899', // pink
   };
   const getTickerColor = (ticker) => tickerColors[ticker] || '#64748b';
+
+  // Fetch available tickers from backend
+  const fetchTickers = async (autoSelectNew = null) => {
+    try {
+      const res = await fetch('http://localhost:8000/api/tickers');
+      if (!res.ok) throw new Error('Failed to fetch tickers list.');
+      const json = await res.json();
+      setAllTickers(json.tickers);
+      
+      if (autoSelectNew) {
+        setSelectedTickers((prev) => {
+          if (!prev.includes(autoSelectNew)) {
+            return [...prev, autoSelectNew];
+          }
+          return prev;
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Load tickers on mount
+  useEffect(() => {
+    fetchTickers();
+  }, []);
+
+  // Sync selected tickers when allTickers is loaded the first time
+  useEffect(() => {
+    if (allTickers.length > 0 && selectedTickers.length === DEFAULT_TICKERS.length && selectedTickers.every((val, i) => val === DEFAULT_TICKERS[i])) {
+      const validDefaults = DEFAULT_TICKERS.filter(t => allTickers.includes(t));
+      if (validDefaults.length > 0) {
+        setSelectedTickers(validDefaults);
+      } else {
+        setSelectedTickers(allTickers.slice(0, 5));
+      }
+    }
+  }, [allTickers]);
 
   // Fetch stock price data and descriptive stats
   const fetchData = async () => {
@@ -288,6 +332,11 @@ export default function App() {
 
   return (
     <div className="app-container">
+      {/* Background Glow Blobs for Glassmorphism depth */}
+      <div className="bg-blob blob-blue"></div>
+      <div className="bg-blob blob-purple"></div>
+      <div className="bg-blob blob-cyan"></div>
+
       {/* SEO hidden tags for crawler parsing */}
       <div className="seo-metadata">
         <h1>PSX Stock Analysis & Statistical Dashboard</h1>
@@ -330,7 +379,7 @@ export default function App() {
         <div className="sidebar-section">
           <span className="sidebar-section-title">Select Tickers</span>
           <div className="ticker-checkbox-grid">
-            {DEFAULT_TICKERS.map(ticker => (
+            {(allTickers.length > 0 ? allTickers : DEFAULT_TICKERS).map(ticker => (
               <label 
                 key={ticker} 
                 className={`ticker-checkbox-label ${selectedTickers.includes(ticker) ? 'active' : ''}`}
@@ -347,6 +396,67 @@ export default function App() {
               </label>
             ))}
           </div>
+        </div>
+
+        {/* Add Ticker Section */}
+        <div className="sidebar-section">
+          <span className="sidebar-section-title">Add Custom Ticker</span>
+          <form 
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!newTicker.trim()) return;
+              const symbol = newTicker.trim().toUpperCase();
+              setAddingTicker(true);
+              setAddTickerError(null);
+              try {
+                const res = await fetch(`http://localhost:8000/api/tickers/add?ticker=${symbol}`, {
+                  method: 'POST'
+                });
+                if (!res.ok) {
+                  const errJson = await res.json();
+                  throw new Error(errJson.detail || 'Failed to download ticker data.');
+                }
+                const resJson = await res.json();
+                const resolvedTicker = resJson.ticker;
+                
+                await fetchTickers(resolvedTicker);
+                setNewTicker('');
+              } catch (err) {
+                setAddTickerError(err.message);
+              } finally {
+                setAddingTicker(false);
+              }
+            }}
+            className="control-group"
+            style={{ gap: '8px' }}
+          >
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input 
+                id="add-ticker-input"
+                type="text" 
+                className="input-date" 
+                style={{ flex: 1, padding: '8px 12px', fontSize: '0.85rem' }}
+                placeholder="e.g. LUCK, AAPL" 
+                value={newTicker}
+                onChange={(e) => setNewTicker(e.target.value)}
+                disabled={addingTicker}
+              />
+              <button 
+                id="add-ticker-btn"
+                type="submit" 
+                className="chart-toggle-btn active"
+                style={{ padding: '0 16px', fontSize: '0.85rem', borderRadius: '8px', cursor: 'pointer' }}
+                disabled={addingTicker}
+              >
+                {addingTicker ? '...' : 'Add'}
+              </button>
+            </div>
+            {addTickerError && (
+              <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: '2px' }}>
+                ⚠️ {addTickerError}
+              </div>
+            )}
+          </form>
         </div>
 
         {/* Missing Tick Alert */}
