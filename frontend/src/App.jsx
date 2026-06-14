@@ -343,14 +343,14 @@ export default function App() {
 
       {/* SEO hidden tags for crawler parsing */}
       <div className="seo-metadata">
-        <h1>PSX Stock Analysis & Statistical Dashboard</h1>
+        <h1>PSX-P&S Stock Analysis & Statistical Dashboard</h1>
         <p>Analyze central tendencies, regression models, correlation matrices, and risk profiles of Pakistan Stock Exchange indexes.</p>
       </div>
 
       {/* Sidebar Controls */}
       <aside className="sidebar" id="sidebar-panel">
         <div className="sidebar-brand">
-          <div className="sidebar-logo">PSX</div>
+          <div className="sidebar-logo">PSX-P&S</div>
           <span className="brand-text">Stock Analytics</span>
         </div>
 
@@ -480,7 +480,7 @@ export default function App() {
       {/* Main Panel */}
       <main className="main-content">
         <header className="header-panel">
-          <h2 className="main-title-text" id="dashboard-heading">PSX Quantitative Stock Analysis</h2>
+          <h2 className="main-title-text" id="dashboard-heading">PSX-P&S Quantitative Stock Analysis</h2>
           <p className="subtitle-text">Descriptive statistics, OLS regression mapping, and diversification evaluations.</p>
         </header>
 

@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import List, Optional
 
 app = FastAPI(
-    title="PSX Stock Analysis API",
+    title="PSX-P&S Stock Analysis API",
     description="Backend API for fetching stock prices, calculating descriptive statistics, and running OLS regression analysis on Pakistan Stock Exchange tickers.",
     version="1.0.0"
 )
@@ -32,23 +32,26 @@ app.add_middleware(
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def migrate_files_to_stocks_data():
-    stocks_dir = os.path.join(BACKEND_DIR, "StocksData")
-    os.makedirs(stocks_dir, exist_ok=True)
-    
-    root_dir = os.path.dirname(BACKEND_DIR)
-    default_files = ['MEBL.json', 'NPL.json', 'SYS.json', 'FFC.json', 'HUBC.json']
-    import shutil
-    for filename in default_files:
-        root_path = os.path.join(root_dir, filename)
-        dest_path = os.path.join(stocks_dir, filename)
-        if os.path.exists(root_path):
-            try:
-                if os.path.exists(dest_path):
-                    os.remove(dest_path)
-                shutil.move(root_path, dest_path)
-                print(f"Migrated {filename} to backend/StocksData/")
-            except Exception as e:
-                print(f"Error migrating {filename}: {e}")
+    try:
+        stocks_dir = os.path.join(BACKEND_DIR, "StocksData")
+        os.makedirs(stocks_dir, exist_ok=True)
+        
+        root_dir = os.path.dirname(BACKEND_DIR)
+        default_files = ['MEBL.json', 'NPL.json', 'SYS.json', 'FFC.json', 'HUBC.json']
+        import shutil
+        for filename in default_files:
+            root_path = os.path.join(root_dir, filename)
+            dest_path = os.path.join(stocks_dir, filename)
+            if os.path.exists(root_path):
+                try:
+                    if os.path.exists(dest_path):
+                        os.remove(dest_path)
+                    shutil.move(root_path, dest_path)
+                    print(f"Migrated {filename} to backend/StocksData/")
+                except Exception as e:
+                    print(f"Error migrating {filename}: {e}")
+    except Exception as e:
+        print(f"Migration error (expected on read-only environments): {e}")
 
 # Run migration on load
 migrate_files_to_stocks_data()
