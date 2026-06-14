@@ -29,26 +29,37 @@ app.add_middleware(
 
 # In-memory tickers
 # Startup Migration logic to move files from root to StocksData/
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def migrate_files_to_stocks_data():
-    stocks_dir = os.path.join(os.getcwd(), "StocksData")
+    stocks_dir = os.path.join(BACKEND_DIR, "StocksData")
     os.makedirs(stocks_dir, exist_ok=True)
     
+    root_dir = os.path.dirname(BACKEND_DIR)
     default_files = ['MEBL.json', 'NPL.json', 'SYS.json', 'FFC.json', 'HUBC.json']
     import shutil
     for filename in default_files:
-        root_path = os.path.join(os.getcwd(), filename)
+        root_path = os.path.join(root_dir, filename)
         dest_path = os.path.join(stocks_dir, filename)
         if os.path.exists(root_path):
             try:
                 if os.path.exists(dest_path):
                     os.remove(dest_path)
                 shutil.move(root_path, dest_path)
-                print(f"Migrated {filename} to StocksData/")
+                print(f"Migrated {filename} to backend/StocksData/")
             except Exception as e:
                 print(f"Error migrating {filename}: {e}")
 
 # Run migration on load
 migrate_files_to_stocks_data()
+
+DEFAULT_TICKERS = ['MEBL.KA', 'NPL.KA', 'SYS.KA', 'FFC.KA', 'HUBC.KA']
+
+class RegressionRequest(BaseModel):
+    x_var: str
+    y_var: str
+    start: str
+    end: str
 
 IN_MEMORY_STOCK_CACHE = {}
 
@@ -87,7 +98,7 @@ def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
 
         # 2. Check local directories (StocksData/ and /tmp/StocksData/)
         if not data_loaded:
-            for base_dir in [os.getcwd(), "/tmp"]:
+            for base_dir in [BACKEND_DIR, "/tmp"]:
                 filepath_check = os.path.join(base_dir, "StocksData", filename)
                 if os.path.exists(filepath_check) and os.path.getsize(filepath_check) > 0:
                     try:
@@ -176,8 +187,8 @@ def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
                                 
                                 # Try to write to project directory
                                 try:
-                                    filepath = os.path.join(os.getcwd(), "StocksData", filename)
-                                    os.makedirs(os.path.join(os.getcwd(), "StocksData"), exist_ok=True)
+                                    filepath = os.path.join(BACKEND_DIR, "StocksData", filename)
+                                    os.makedirs(os.path.join(BACKEND_DIR, "StocksData"), exist_ok=True)
                                     with open(filepath, 'w', encoding='utf-8') as f:
                                         json.dump(save_records, f, indent=2)
                                     print(f"Cached {ticker} data to StocksData/{filename}")
@@ -204,7 +215,7 @@ def fetch_stock_data(tickers: List[str], start: str, end: str) -> pd.DataFrame:
 
             # Offline / Cached Fallbacks
             if not data_loaded:
-                for base_dir in [os.getcwd(), "/tmp"]:
+                for base_dir in [BACKEND_DIR, "/tmp"]:
                     filepath_check = os.path.join(base_dir, "StocksData", filename)
                     if os.path.exists(filepath_check) and os.path.getsize(filepath_check) > 0:
                         print(f"Network download failed for {ticker}. Attempting fallback to existing local cache at {filepath_check}...")
@@ -242,7 +253,7 @@ async def get_tickers():
         tickers.append(k)
         
     # 2. Scan StocksData directories
-    for base_dir in [os.getcwd(), "/tmp"]:
+    for base_dir in [BACKEND_DIR, "/tmp"]:
         stocks_dir = os.path.join(base_dir, "StocksData")
         if os.path.exists(stocks_dir):
             try:
@@ -323,10 +334,10 @@ async def add_ticker(ticker: str = Query(..., description="Ticker symbol to add"
         IN_MEMORY_STOCK_CACHE[yf_symbol] = json_records
         
         # Try writing to root folder
-        filepath = os.path.join(os.getcwd(), "StocksData", filename)
+        filepath = os.path.join(BACKEND_DIR, "StocksData", filename)
         disk_written = False
         try:
-            os.makedirs(os.path.join(os.getcwd(), "StocksData"), exist_ok=True)
+            os.makedirs(os.path.join(BACKEND_DIR, "StocksData"), exist_ok=True)
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(json_records, f, indent=2)
             disk_written = True
@@ -353,7 +364,7 @@ async def add_ticker(ticker: str = Query(..., description="Ticker symbol to add"
         }
     except Exception as e:
         # Fallback to local files if present
-        for base_dir in [os.getcwd(), "/tmp"]:
+        for base_dir in [BACKEND_DIR, "/tmp"]:
             filepath_check = os.path.join(base_dir, "StocksData", filename)
             if os.path.exists(filepath_check) and os.path.getsize(filepath_check) > 0:
                 return {
