@@ -21,6 +21,12 @@ end_date = datetime.today().strftime('%Y-%m-%d')
 print(f"Downloading historical stock data from {start_date} to {end_date}...")
 
 for ticker, filename in tickers.items():
+    stocks_dir = os.path.join(os.getcwd(), "StocksData")
+    output_path = os.path.join(stocks_dir, filename)
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        print(f"Stock data for {ticker} already exists at {output_path}. Skipping download.")
+        continue
+
     print(f"Fetching data for {ticker}...")
     try:
         # Download historical data

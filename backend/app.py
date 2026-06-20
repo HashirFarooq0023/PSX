@@ -28,7 +28,7 @@ app.add_middleware(
 )
 
 # In-memory tickers
-# Startup Migration logic to move files from root to StocksData/
+DEFAULT_TICKERS = ['MEBL.KA', 'NPL.KA', 'SYS.KA', 'FFC.KA', 'HUBC.KA']
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def migrate_files_to_stocks_data():
@@ -53,10 +53,66 @@ def migrate_files_to_stocks_data():
     except Exception as e:
         print(f"Migration error (expected on read-only environments): {e}")
 
-# Run migration on load
-migrate_files_to_stocks_data()
+def download_default_tickers_if_needed():
+    try:
+        stocks_dir = os.path.join(BACKEND_DIR, "StocksData")
+        os.makedirs(stocks_dir, exist_ok=True)
+        json_files = [f for f in os.listdir(stocks_dir) if f.endswith(".json")]
+        if not json_files:
+            print("StocksData folder does not exist or has no stock files. Downloading defaults...")
+            start_date = "2024-01-01"
+            end_date = datetime.today().strftime('%Y-%m-%d')
+            for ticker in DEFAULT_TICKERS:
+                symbol = ticker.split('.')[0]
+                filename = f"{symbol}.json"
+                print(f"Downloading default stock: {ticker}...")
+                try:
+                    raw_df = yf.download(ticker, start=start_date, end=end_date)
+                    if not raw_df.empty:
+                        df = pd.DataFrame(index=raw_df.index)
+                        if isinstance(raw_df.columns, pd.MultiIndex):
+                            df['Open'] = raw_df['Open'][ticker]
+                            df['High'] = raw_df['High'][ticker]
+                            df['Low'] = raw_df['Low'][ticker]
+                            df['Close'] = raw_df['Close'][ticker]
+                            df['Adj Close'] = raw_df['Adj Close'][ticker] if 'Adj Close' in raw_df.columns.levels[0] else raw_df['Close'][ticker]
+                            df['Volume'] = raw_df['Volume'][ticker]
+                        else:
+                            df['Open'] = raw_df['Open']
+                            df['High'] = raw_df['High']
+                            df['Low'] = raw_df['Low']
+                            df['Close'] = raw_df['Close']
+                            df['Adj Close'] = raw_df['Adj Close'] if 'Adj Close' in raw_df.columns else raw_df['Close']
+                            df['Volume'] = raw_df['Volume']
+                        
+                        df = df.reset_index()
+                        df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
+                        df = df.replace({np.nan: None})
+                        
+                        json_records = []
+                        for _, row in df.iterrows():
+                            json_records.append({
+                                'date': row['Date'],
+                                'open': row['Open'],
+                                'high': row['High'],
+                                'low': row['Low'],
+                                'close': row['Close'],
+                                'adj_close': row['Adj Close'],
+                                'volume': int(row['Volume']) if row['Volume'] is not None else 0
+                            })
+                        
+                        filepath = os.path.join(stocks_dir, filename)
+                        with open(filepath, 'w', encoding='utf-8') as f:
+                            json.dump(json_records, f, indent=2)
+                        print(f"Successfully downloaded and saved {ticker} to {filepath}")
+                except Exception as e:
+                    print(f"Failed to download {ticker} on startup: {e}")
+    except Exception as e:
+        print(f"Error checking/downloading default stocks: {e}")
 
-DEFAULT_TICKERS = ['MEBL.KA', 'NPL.KA', 'SYS.KA', 'FFC.KA', 'HUBC.KA']
+# Run migration and initial check/download on load
+migrate_files_to_stocks_data()
+download_default_tickers_if_needed()
 
 class RegressionRequest(BaseModel):
     x_var: str
@@ -286,6 +342,26 @@ async def add_ticker(ticker: str = Query(..., description="Ticker symbol to add"
     symbol_name = yf_symbol.split('.')[0]
     filename = f"{symbol_name}.json"
     
+    # First check if the file already exists in StocksData (or /tmp/StocksData)
+    for base_dir in [BACKEND_DIR, "/tmp"]:
+        filepath_check = os.path.join(base_dir, "StocksData", filename)
+        if os.path.exists(filepath_check) and os.path.getsize(filepath_check) > 0:
+            try:
+                with open(filepath_check, 'r', encoding='utf-8') as f:
+                    json_records = json.load(f)
+                if json_records:
+                    IN_MEMORY_STOCK_CACHE[yf_symbol] = json_records
+                    print(f"Ticker {yf_symbol} already exists in local storage. Skipping yfinance download.")
+                    return {
+                        "status": "success",
+                        "ticker": yf_symbol,
+                        "filename": filename,
+                        "records_count": len(json_records),
+                        "message": "Ticker already exists in local storage. Loaded from disk."
+                    }
+            except Exception as e:
+                print(f"Error loading existing file {filepath_check} for {yf_symbol}: {e}")
+                
     start_date = "2024-01-01"
     end_date = datetime.today().strftime('%Y-%m-%d')
     
@@ -378,6 +454,58 @@ async def add_ticker(ticker: str = Query(..., description="Ticker symbol to add"
                     "note": str(e)
                 }
         raise HTTPException(status_code=500, detail=f"Failed to fetch stock data for {ticker}: {str(e)}")
+
+@app.post("/api/tickers/delete")
+async def delete_ticker(ticker: str = Query(..., description="Ticker symbol to delete")):
+    ticker = ticker.strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="Ticker symbol cannot be empty.")
+        
+    yf_symbol = ticker
+    if '.' not in ticker:
+        yf_symbol = f"{ticker}.KA"
+        
+    symbol_name = yf_symbol.split('.')[0]
+    filename = f"{symbol_name}.json"
+    
+    deleted_any = False
+    
+    # 1. Remove from in-memory cache
+    if yf_symbol in IN_MEMORY_STOCK_CACHE:
+        del IN_MEMORY_STOCK_CACHE[yf_symbol]
+        deleted_any = True
+    if symbol_name in IN_MEMORY_STOCK_CACHE:
+        del IN_MEMORY_STOCK_CACHE[symbol_name]
+        deleted_any = True
+        
+    # 2. Remove from StocksData directories
+    for base_dir in [BACKEND_DIR, "/tmp"]:
+        stocks_dir = os.path.join(base_dir, "StocksData")
+        filepath = os.path.join(stocks_dir, filename)
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+                deleted_any = True
+                print(f"Deleted stock file: {filepath}")
+            except Exception as e:
+                print(f"Error deleting file {filepath}: {e}")
+                
+    # 3. If it is in DEFAULT_TICKERS, remove it
+    if yf_symbol in DEFAULT_TICKERS:
+        DEFAULT_TICKERS.remove(yf_symbol)
+        deleted_any = True
+    elif ticker in DEFAULT_TICKERS:
+        DEFAULT_TICKERS.remove(ticker)
+        deleted_any = True
+        
+    if not deleted_any:
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found in cache or local files.")
+        
+    return {
+        "status": "success",
+        "ticker": yf_symbol,
+        "message": f"Successfully deleted ticker {yf_symbol} from storage."
+    }
 
 @app.get("/api/data")
 async def get_data(

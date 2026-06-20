@@ -5,7 +5,8 @@ import {
 } from 'recharts';
 import { 
   TrendingUp, BarChart2, Hash, Calendar, PieChart, 
-  HelpCircle, AlertTriangle, ShieldCheck, ChevronRight, Activity, ArrowRightLeft 
+  HelpCircle, AlertTriangle, ShieldCheck, ChevronRight, Activity, ArrowRightLeft,
+  Trash2
 } from 'lucide-react';
 
 const DEFAULT_TICKERS = ['MEBL.KA', 'NPL.KA', 'SYS.KA', 'FFC.KA', 'HUBC.KA'];
@@ -83,6 +84,37 @@ export default function App() {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // Delete ticker from backend and update lists
+  const handleDeleteTicker = async (tickerToDelete) => {
+    console.log("handleDeleteTicker called for:", tickerToDelete);
+    if (!window.confirm(`Are you sure you want to delete ${tickerToDelete}?`)) {
+      console.log("Deletion cancelled by user.");
+      return;
+    }
+    try {
+      console.log("Sending POST request to delete:", tickerToDelete);
+      const res = await fetch(`${API_BASE}/api/tickers/delete?ticker=${tickerToDelete}`, {
+        method: 'POST'
+      });
+      console.log("Delete response status:", res.status);
+      if (!res.ok) {
+        const errJson = await res.json();
+        throw new Error(errJson.detail || 'Failed to delete ticker.');
+      }
+      
+      // Update selected tickers if the deleted ticker was selected
+      setSelectedTickers(prev => prev.filter(t => t !== tickerToDelete));
+      
+      // Refetch tickers list to update UI
+      await fetchTickers();
+      console.log("Refetched tickers successfully.");
+      
+    } catch (err) {
+      console.error("Error in handleDeleteTicker:", err);
+      alert(`Error deleting stock: ${err.message}`);
     }
   };
 
@@ -343,14 +375,14 @@ export default function App() {
 
       {/* SEO hidden tags for crawler parsing */}
       <div className="seo-metadata">
-        <h1>PSX-P&S Stock Analysis & Statistical Dashboard</h1>
+        <h1>PSX Stock Analysis & Statistical Dashboard</h1>
         <p>Analyze central tendencies, regression models, correlation matrices, and risk profiles of Pakistan Stock Exchange indexes.</p>
       </div>
 
       {/* Sidebar Controls */}
       <aside className="sidebar" id="sidebar-panel">
         <div className="sidebar-brand">
-          <div className="sidebar-logo">PSX-P&S</div>
+          <div className="sidebar-logo">PSX</div>
           <span className="brand-text">Stock Analytics</span>
         </div>
 
@@ -384,20 +416,35 @@ export default function App() {
           <span className="sidebar-section-title">Select Tickers</span>
           <div className="ticker-checkbox-grid">
             {(allTickers.length > 0 ? allTickers : DEFAULT_TICKERS).map(ticker => (
-              <label 
-                key={ticker} 
-                className={`ticker-checkbox-label ${selectedTickers.includes(ticker) ? 'active' : ''}`}
-                id={`label-ticker-${ticker.replace('.', '-')}`}
-              >
-                <span>{ticker}</span>
-                <input 
-                  id={`checkbox-${ticker.replace('.', '-')}`}
-                  type="checkbox" 
-                  className="checkbox-input" 
-                  checked={selectedTickers.includes(ticker)} 
-                  onChange={() => toggleTicker(ticker)}
-                />
-              </label>
+              <div key={ticker} className="ticker-item-row">
+                <label 
+                  className={`ticker-checkbox-label ${selectedTickers.includes(ticker) ? 'active' : ''}`}
+                  id={`label-ticker-${ticker.replace('.', '-')}`}
+                  style={{ flex: 1, cursor: 'pointer' }}
+                >
+                  <span>{ticker}</span>
+                  <input 
+                    id={`checkbox-${ticker.replace('.', '-')}`}
+                    type="checkbox" 
+                    className="checkbox-input" 
+                    checked={selectedTickers.includes(ticker)} 
+                    onChange={() => toggleTicker(ticker)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="delete-ticker-btn"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleDeleteTicker(ticker);
+                  }}
+                  title={`Delete ${ticker}`}
+                  aria-label={`Delete ${ticker}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             ))}
           </div>
         </div>
@@ -480,7 +527,7 @@ export default function App() {
       {/* Main Panel */}
       <main className="main-content">
         <header className="header-panel">
-          <h2 className="main-title-text" id="dashboard-heading">PSX-P&S Quantitative Stock Analysis</h2>
+          <h2 className="main-title-text" id="dashboard-heading">PSX Quantitative Stock Analysis</h2>
           <p className="subtitle-text">Descriptive statistics, OLS regression mapping, and diversification evaluations.</p>
         </header>
 
@@ -513,6 +560,13 @@ export default function App() {
             onClick={() => setActiveTab('conclusions')}
           >
             <PieChart size={16} /> 6. Strategy & Insights
+          </button>
+          <button 
+            id="tab-btn-details"
+            className={`tab-btn ${activeTab === 'details' ? 'active' : ''}`}
+            onClick={() => setActiveTab('details')}
+          >
+            <HelpCircle size={16} /> Details
           </button>
         </nav>
 
@@ -1195,6 +1249,238 @@ export default function App() {
                   )}
                 </div>
               </section>
+            )}
+
+            {/* TAB 5: DETAILS & METHODOLOGY */}
+            {activeTab === 'details' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+                <section id="section-details-methodology" className="glass-card glow">
+                  <div className="card-header" style={{ marginBottom: '25px', borderBottom: '1px solid var(--border-color)', paddingBottom: '15px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <HelpCircle size={24} style={{ color: 'var(--color-accent-blue)' }} />
+                      <h3>DETAILS & METHODOLOGY</h3>
+                    </div>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '6px' }}>
+                      Documentation of the variables, analytical structures, and statistical models driving this system.
+                    </p>
+                  </div>
+
+                  <div className="rec-section">
+                    {/* Intro */}
+                    <div className="rec-block">
+                      <div className="rec-title-row">
+                        <span style={{ 
+                          width: '8px', 
+                          height: '8px', 
+                          borderRadius: '50%', 
+                          backgroundColor: 'var(--color-accent-blue)', 
+                          display: 'inline-block' 
+                        }}></span>
+                        <span>Introduction</span>
+                      </div>
+                      <p className="rec-desc" style={{ lineHeight: '1.6' }}>
+                        This application serves as a quantitative analytical workspace for exploring and evaluating historical stock price series listed on the Pakistan Stock Exchange (PSX). It provides tools for compiling descriptive statistics (measures of central tendency and dispersion), visualizing raw and normalized timelines, constructing price frequency distributions (histograms), mapping correlation coefficients, and fitting Ordinary Least Squares (OLS) linear regression lines.
+                      </p>
+                    </div>
+
+                    {/* Anal */}
+                    <div className="rec-block">
+                      <div className="rec-title-row">
+                        <span style={{ 
+                          width: '8px', 
+                          height: '8px', 
+                          borderRadius: '50%', 
+                          backgroundColor: 'var(--color-accent-cyan)', 
+                          display: 'inline-block' 
+                        }}></span>
+                        <span>Analysis</span>
+                      </div>
+                      <p className="rec-desc" style={{ lineHeight: '1.6' }}>
+                        The analytical suite leverages classical statistical mechanics to inspect stock return attributes:
+                      </p>
+                      <ul style={{ paddingLeft: '20px', color: 'var(--text-secondary)', fontSize: '0.875rem', display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
+                        <li><strong>Descriptive Metrics:</strong> Calculates Mean, Median, and Mode to define the distribution center, along with Standard Deviation (σ), Interquartile Range (IQR), and Coefficient of Variation (CV %) to quantify asset dispersion and relative risk.</li>
+                        <li><strong>Co-movement and Association:</strong> Evaluates bivariate scatter dynamics, pricing timelines (absolute and base-100 normalized performance comparison), and asset-pair correlation matrices.</li>
+                        <li><strong>Predictive Econometrics:</strong> Applies OLS linear regression models to solve parameters for forecasting stock price movements.</li>
+                      </ul>
+                    </div>
+
+                    {/* Concl */}
+                    <div className="rec-block">
+                      <div className="rec-title-row">
+                        <span style={{ 
+                          width: '8px', 
+                          height: '8px', 
+                          borderRadius: '50%', 
+                          backgroundColor: '#a855f7', 
+                          display: 'inline-block' 
+                        }}></span>
+                        <span>Conclusion</span>
+                      </div>
+                      <p className="rec-desc" style={{ lineHeight: '1.6' }}>
+                        Empirical findings indicate that asset volatility is heavily dependent on sectoral characteristics (e.g., technology growth firms exhibit wider price deviations compared to defensive industries like manufacturing or fertilizer producers). Diversification efficacy relies on maintaining a low average portfolio correlation coefficient; holding closely correlated stocks increases susceptibility to systematic market shocks.
+                      </p>
+                    </div>
+
+                    {/* Which variables were used */}
+                    <div className="rec-block" style={{ borderLeft: '3px solid var(--color-accent-blue)' }}>
+                      <div className="rec-title-row">
+                        <Activity size={18} style={{ color: 'var(--color-accent-blue)' }} />
+                        <span>Which variables were used?</span>
+                      </div>
+                      <p className="rec-desc" style={{ marginBottom: '8px' }}>
+                        The model variables represent the daily Adjusted Close or Close share prices (measured in PKR) of the selected stock tickers:
+                      </p>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '6px' }}>
+                        {availableTickers.map(ticker => (
+                          <div key={ticker} style={{
+                            padding: '6px 12px',
+                            backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                            border: '1px solid rgba(59, 130, 246, 0.2)',
+                            borderRadius: '20px',
+                            fontSize: '0.8rem',
+                            fontWeight: '600',
+                            color: getTickerColor(ticker)
+                          }}>
+                            {ticker}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Dependent and independent variable */}
+                    <div className="rec-block" style={{ borderLeft: '3px solid var(--color-accent-cyan)' }}>
+                      <div className="rec-title-row">
+                        <ArrowRightLeft size={18} style={{ color: 'var(--color-accent-cyan)' }} />
+                        <span>Dependent and Independent Variable</span>
+                      </div>
+                      <p className="rec-desc">
+                        Bivariate Ordinary Least Squares (OLS) regression models the mathematical response of one stock relative to another:
+                      </p>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '15px', marginTop: '10px' }}>
+                        <div style={{ padding: '12px', backgroundColor: 'rgba(59, 130, 246, 0.04)', border: '1px solid rgba(59, 130, 246, 0.12)', borderRadius: '8px' }}>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--color-accent-blue)', display: 'block', textTransform: 'uppercase', marginBottom: '4px' }}>Independent Variable (X)</span>
+                          <span style={{ fontSize: '1.1rem', fontWeight: '800', color: 'white', display: 'block', marginBottom: '4px' }}>{xVar || 'Not Selected'}</span>
+                          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                            The explanatory or driver stock. Its price modifications act as the inputs to evaluate whether they linearly predict variations in the response stock.
+                          </p>
+                        </div>
+                        <div style={{ padding: '12px', backgroundColor: 'rgba(6, 182, 212, 0.04)', border: '1px solid rgba(6, 182, 212, 0.12)', borderRadius: '8px' }}>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--color-accent-cyan)', display: 'block', textTransform: 'uppercase', marginBottom: '4px' }}>Dependent Variable (Y)</span>
+                          <span style={{ fontSize: '1.1rem', fontWeight: '800', color: 'white', display: 'block', marginBottom: '4px' }}>{yVar || 'Not Selected'}</span>
+                          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                            The response or outcome stock. Its values are modeled as Y = β × X + Constant, showing the degree of price dependency on the independent variable.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* OLS Model Formulas & Explanation */}
+                    <div className="rec-block" style={{ borderLeft: '3px solid #3b82f6' }}>
+                      <div className="rec-title-row">
+                        <TrendingUp size={18} style={{ color: '#3b82f6' }} />
+                        <span>OLS Model: Key Formulas & How It Works</span>
+                      </div>
+                      <p className="rec-desc">
+                        Ordinary Least Squares (OLS) is a regression technique that estimates the linear relationship between the independent variable (X) and the dependent variable (Y). It works by fitting a line that minimizes the sum of squared differences (residuals) between the observed price points and the regression line.
+                      </p>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '15px', marginTop: '10px' }}>
+                        <div style={{ padding: '14px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#60a5fa', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>1. Regression Line Equation</span>
+                          <div style={{ fontFamily: 'monospace', fontSize: '0.95rem', color: '#34d399', backgroundColor: 'rgba(0,0,0,0.3)', padding: '8px 12px', borderRadius: '6px', marginBottom: '6px' }}>
+                            Y = &beta; &times; X + &alpha;
+                          </div>
+                          <ul style={{ paddingLeft: '16px', fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            <li><strong>Y:</strong> Predicted stock price of {yVar || 'Dependent stock'}</li>
+                            <li><strong>X:</strong> Stock price of {xVar || 'Independent stock'}</li>
+                            <li><strong>&beta; (Beta):</strong> Slope coefficient (sensitivity rate)</li>
+                            <li><strong>&alpha; (Alpha):</strong> Intercept constant (value of Y when X is 0)</li>
+                          </ul>
+                        </div>
+
+                        <div style={{ padding: '14px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#60a5fa', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>2. Coefficient Estimations</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <div>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Slope (&beta;) Formula:</span>
+                              <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#f59e0b', backgroundColor: 'rgba(0,0,0,0.3)', padding: '6px 10px', borderRadius: '4px' }}>
+                                &beta; = Cov(X, Y) / Var(X) = &Sigma;((X<sub>i</sub> - X̄)(Y<sub>i</sub> - Ȳ)) / &Sigma;(X<sub>i</sub> - X̄)<sup>2</sup>
+                              </div>
+                            </div>
+                            <div>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Intercept (&alpha;) Formula:</span>
+                              <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#f59e0b', backgroundColor: 'rgba(0,0,0,0.3)', padding: '6px 10px', borderRadius: '4px' }}>
+                                &alpha; = Ȳ - &beta; &times; X̄
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ padding: '14px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#60a5fa', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>3. How It Works (Least Squares Principle)</span>
+                          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                            The model calculates the vertical distance (residual e<sub>i</sub> = Y<sub>i</sub> - Ŷ<sub>i</sub>) from each actual price point to the line, and minimizes the **Sum of Squared Residuals (SSR)**:
+                          </p>
+                          <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#fca5a5', backgroundColor: 'rgba(0,0,0,0.3)', padding: '6px 10px', borderRadius: '4px', margin: '6px 0', textAlign: 'center' }}>
+                            SSR = &Sigma;(Y<sub>i</sub> - (&beta; &times; X<sub>i</sub> + &alpha;))<sup>2</sup>
+                          </div>
+                          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            Minimizing the squared terms penalizes larger outliers more heavily, ensuring the line is statistically balanced.
+                          </p>
+                        </div>
+
+                        <div style={{ padding: '14px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#60a5fa', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>4. Goodness-of-Fit (R²) Formula</span>
+                          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                            To measure how well the line fits the data, we compute the Coefficient of Determination (R²):
+                          </p>
+                          <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#fca5a5', backgroundColor: 'rgba(0,0,0,0.3)', padding: '6px 10px', borderRadius: '4px', margin: '6px 0', textAlign: 'center' }}>
+                            R² = 1 - (SSR / SST)
+                          </div>
+                          <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                            Where SST = &Sigma;(Y<sub>i</sub> - Ȳ)<sup>2</sup> is the Total Sum of Squares. R² ranges from 0 to 1, showing the percentage of variance in Y explained by X.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* What does Slope define */}
+                    <div className="rec-block" style={{ borderLeft: '3px solid var(--color-accent-red)' }}>
+                      <div className="rec-title-row">
+                        <TrendingUp size={18} style={{ color: 'var(--color-accent-red)' }} />
+                        <span>What does Slope define?</span>
+                      </div>
+                      <p className="rec-desc">
+                        The regression slope (represented as coefficient <strong>&beta;</strong> in the fitted model equation) defines the expected direction and rate of change in the dependent stock price ($Y$) for every <strong>1 PKR</strong> increase in the independent stock price ($X$).
+                      </p>
+                      <div style={{ padding: '12px 16px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-color)', borderRadius: '8px', fontSize: '0.85rem', marginTop: '6px' }}>
+                        <ul style={{ display: 'flex', flexDirection: 'column', gap: '8px', listStyleType: 'none' }}>
+                          <li>📈 <strong>&beta; &gt; 0 (Positive Slope):</strong> Directly proportional relationship. A 1 PKR rise in {xVar || 'Stock X'} predicts a {regressionRes ? regressionRes.beta.toFixed(4) : 'β'} PKR increase in {yVar || 'Stock Y'}.</li>
+                          <li>📉 <strong>&beta; &lt; 0 (Negative Slope):</strong> Inversely proportional relationship. A 1 PKR rise in {xVar || 'Stock X'} predicts a {regressionRes ? Math.abs(regressionRes.beta).toFixed(4) : 'β'} PKR decline in {yVar || 'Stock Y'}.</li>
+                          <li>⚪ <strong>&beta; &approx; 0 (Flat Slope):</strong> No linear impact. Fluctuations in the price of {xVar || 'Stock X'} do not trigger predictive movements in {yVar || 'Stock Y'}.</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* Conclusion of correlation slope */}
+                    <div className="rec-block" style={{ borderLeft: '3px solid #eab308' }}>
+                      <div className="rec-title-row">
+                        <ShieldCheck size={18} style={{ color: '#eab308' }} />
+                        <span>Conclusion of correlation slope</span>
+                      </div>
+                      <p className="rec-desc" style={{ lineHeight: '1.6' }}>
+                        Analyzing the correlation coefficient (R) alongside the OLS slope (&beta;) leads to these joint conclusions:
+                      </p>
+                      <ul style={{ paddingLeft: '20px', color: 'var(--text-secondary)', fontSize: '0.875rem', display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                        <li><strong>Sign Compatibility:</strong> The Pearson correlation coefficient (R) and the OLS regression slope (&beta;) always share the identical positive or negative sign, denoting consistent directionality.</li>
+                        <li><strong>Goodness of Fit ($R^2$):</strong> The Coefficient of Determination ($R^2$) represents the proportion of variance in the dependent variable that is explained by the independent variable. A higher $R^2$ makes predictions based on the slope significantly more reliable.</li>
+                        <li><strong>Significance:</strong> A P-value smaller than 0.05 indicates a statistically significant relationship, implying that the observed slope is real and highly unlikely to be the result of random chance.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </section>
+              </div>
             )}
           </div>
         )}
